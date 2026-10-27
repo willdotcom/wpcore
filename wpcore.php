@@ -662,7 +662,7 @@ final class UI
                 App::abort();
             }
             $a = trim($a) === '' ? $default : trim($a);
-            $error = $validate ? $validate($a) : null;
+            $error = $validate && $a !== '' ? $validate($a) : null;
             if ($error === null && $a !== '') {
                 if (Term::$tty) {
                     Term::write("\033[1A\r\033[K");
@@ -1073,6 +1073,33 @@ final class WordPress
             }
         }
         return null;
+    }
+
+    /** Recorre hasta $depth niveles bajo $dir buscando instalaciones de WordPress. */
+    public static function findInstalls(string $dir, int $depth = 3): array
+    {
+        $skip = ['wp-admin', 'wp-includes', 'wp-content', 'node_modules', 'vendor', 'mail', 'etc', 'logs', 'tmp', 'ssl', 'cache', 'backups'];
+        $found = [];
+        $queue = [[$dir, 0]];
+        while ($queue && count($found) < 30) {
+            [$d, $level] = array_shift($queue);
+            if ($level > 0 && self::isRoot($d)) {
+                $found[] = $d;
+                continue;
+            }
+            if ($level >= $depth) {
+                continue;
+            }
+            foreach (@scandir($d) ?: [] as $e) {
+                // los symlinks (p. ej. www → public_html en cPanel) se omiten para no duplicar
+                if ($e[0] === '.' || in_array($e, $skip, true) || is_link("$d/$e") || !is_dir("$d/$e")) {
+                    continue;
+                }
+                $queue[] = ["$d/$e", $level + 1];
+            }
+        }
+        sort($found);
+        return $found;
     }
 
     private static function isRoot(string $dir): bool
@@ -1616,6 +1643,10 @@ final class App
         $start = is_string($this->opts['path'] ?? null) ? $this->opts['path'] : getcwd();
         $root = WordPress::detect($start);
         while ($root === null) {
+            $root = $this->pickInstall((string) $start);
+            if ($root !== null) {
+                break;
+            }
             Term::line();
             UI::warning('No se encontró WordPress en ' . C::white(Fs::norm((string) $start)));
             if (UI::$auto || !Term::$input) {
@@ -1627,6 +1658,40 @@ final class App
             $root = WordPress::detect($start);
         }
         $this->wp = new WordPress($root);
+    }
+
+    /** Busca instalaciones en subcarpetas de $start y deja elegir si hay varias. */
+    private function pickInstall(string $start): ?string
+    {
+        if (!is_dir($start)) {
+            return null;
+        }
+        $base = Fs::norm((string) realpath($start));
+        $found = Task::run('Buscando WordPress en las subcarpetas de ' . Str::fitLeft($base, 40), function (Task $t) use ($base) {
+            $found = WordPress::findInstalls($base);
+            $t->done($found ? Str::plural(count($found), 'instalación', 'instalaciones') : 'ninguna');
+            return $found;
+        });
+        if (count($found) === 1) {
+            return $found[0];
+        }
+        if (!$found) {
+            return null;
+        }
+        $rel = function (string $p) use ($base): string {
+            return Str::starts($p, "$base/") ? substr($p, strlen($base) + 1) : $p;
+        };
+        if (UI::$auto || !Term::$input) {
+            UI::items(array_map($rel, $found), 30, 'white');
+            throw new RuntimeException('Hay varias instalaciones: elige una con --path=/ruta/a/wordpress');
+        }
+        $opts = [];
+        foreach ($found as $p) {
+            $version = (new WordPress($p))->version();
+            $opts[$p] = ['label' => $rel($p), 'hint' => $version ? "WordPress $version" : 'núcleo dañado o eliminado'];
+        }
+        Term::line();
+        return UI::select('¿Qué sitio quieres usar?', $opts);
     }
 
     private function summary(): void
