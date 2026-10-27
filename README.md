@@ -38,6 +38,8 @@ El script solo funciona desde la terminal: si alguien lo abre desde el navegador
 
 Sin argumentos se abre el asistente interactivo. Muestra los datos del sitio y un menú que se maneja con las flechas, espacio para marcar y enter para confirmar. Si la terminal no admite flechas, las opciones se eligen por número.
 
+¿Elegiste mal? Pulsa **←** o **Esc** (o `0` en el modo por números) para volver al paso anterior. La confirmación final también ofrece **Volver y cambiar opciones**, y nada se modifica hasta que eliges **Iniciar la reinstalación**. Si la cuenta tiene varios WordPress, el menú principal incluye **Cambiar de sitio**.
+
 ```bash
 php wpcore.php
 ```
@@ -94,6 +96,17 @@ php wpcore.php verify --path=/home/cliente/public_html --report=/home/cliente/re
    - Verificación final con checksums.
 
 `wp-content/` no se modifica. Los PHP sospechosos que haya en `uploads` se informan para que los revises a mano.
+
+## Cómo decide qué está infectado
+
+| Categoría | Criterio |
+| --- | --- |
+| **Modificados** | El MD5 del archivo no coincide con el checksum oficial de wordpress.org para esa versión. |
+| **Faltantes** | El checksum oficial lista el archivo, pero no existe. |
+| **Inyectados** | Archivo con extensión ejecutable (`.php`, `.phtml`, `.js`, `.html`, `.htaccess`…) dentro de `wp-admin/` o `wp-includes/` que no está en la lista oficial. |
+| **Otros no oficiales** | Archivos no ejecutables que tampoco están en la lista oficial. Se eliminan al reinstalar, pero no se consideran una amenaza. Se ignoran `error_log`, `.DS_Store` y `Thumbs.db`. |
+| **PHP en uploads** | Se lee el contenido. Se descartan los que no tienen código: `index.php` vacíos o con solo comentarios, y los archivos `._` de macOS. Los que coinciden con firmas de malware se marcan como **malware**; el resto, como **para revisar**. |
+| **`scan`** | Busca en el contenido patrones típicos de malware: `eval(base64_decode(`, ejecución de `$_POST`/`$_GET`, `include` de archivos `.ico` o `.png`, web shells conocidas, ofuscación hexadecimal o base64. Es heurístico: revisa cada archivo antes de borrarlo. |
 
 ## Después de limpiar
 

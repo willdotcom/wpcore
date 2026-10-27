@@ -142,6 +142,7 @@ final class Term
         switch ($c) {
             case "\033[A": case "\033OA": case 'k': return 'up';
             case "\033[B": case "\033OB": case 'j': return 'down';
+            case "\033[D": case "\033OD": return 'left';
             case "\n": case "\r": return 'enter';
             case ' ': return 'space';
             case "\x03": case "\x04": return 'ctrl-c';
@@ -300,8 +301,21 @@ final class UI
 {
     const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
 
+    /** Valor que devuelven select() y multiselect() cuando se pide volver al paso anterior. */
+    const BACK = "\0back";
+
     /** Modo desatendido (--yes): los prompts devuelven su valor por defecto. */
     public static $auto = false;
+
+    public static function back(): void
+    {
+        Term::line('  ' . C::muted('↩ Volviendo al paso anterior'));
+    }
+
+    private static function wantsBack(string $key): bool
+    {
+        return in_array($key, ['left', 'esc', 'b'], true);
+    }
 
     public static function banner(): void
     {
@@ -434,8 +448,8 @@ final class UI
         App::abort();
     }
 
-    /** Menú de una opción. Devuelve la clave elegida. */
-    public static function select(string $q, array $opts, $default = null)
+    /** Menú de una opción. Devuelve la clave elegida, o UI::BACK si $back y se pide volver. */
+    public static function select(string $q, array $opts, $default = null, bool $back = false)
     {
         $opts = self::normalize($opts);
         $keys = array_keys($opts);
@@ -449,7 +463,7 @@ final class UI
         if (Term::rawOn()) {
             $n = count($keys);
             Term::hideCursor();
-            $lines = self::drawSelect($q, $opts, $cur);
+            $lines = self::drawSelect($q, $opts, $cur, $back);
             while (true) {
                 $k = Term::key();
                 if ($k === 'up') {
@@ -460,13 +474,18 @@ final class UI
                     $cur = (int) $k - 1;
                 } elseif ($k === 'enter') {
                     break;
+                } elseif ($back && self::wantsBack($k)) {
+                    Term::clearUp($lines);
+                    Term::rawOff();
+                    Term::showCursor();
+                    return self::BACK;
                 } elseif (in_array($k, ['ctrl-c', 'esc', 'q'], true)) {
                     self::cancelPrompt($lines);
                 } else {
                     continue;
                 }
                 Term::clearUp($lines);
-                $lines = self::drawSelect($q, $opts, $cur);
+                $lines = self::drawSelect($q, $opts, $cur, $back);
             }
             Term::clearUp($lines);
             Term::rawOff();
@@ -478,6 +497,9 @@ final class UI
                 $o = $opts[$key];
                 Term::line('    ' . C::accent((string) ($i + 1)) . C::muted(')') . ' ' . Str::pad($o['label'], $labelW) . ($o['hint'] !== '' ? '   ' . C::muted($o['hint']) : ''));
             }
+            if ($back) {
+                Term::line('    ' . C::accent('0') . C::muted(') ← Volver al paso anterior'));
+            }
             while (true) {
                 $a = Term::readLine('    ' . C::muted('Opción [' . ($cur + 1) . ']: '));
                 if ($a === null) {
@@ -486,6 +508,9 @@ final class UI
                 $a = trim($a);
                 if ($a === '') {
                     break;
+                }
+                if ($back && ($a === '0' || strtolower($a) === 'b')) {
+                    return self::BACK;
                 }
                 if (ctype_digit($a) && (int) $a >= 1 && (int) $a <= count($keys)) {
                     $cur = (int) $a - 1;
@@ -499,7 +524,7 @@ final class UI
         return $keys[$cur];
     }
 
-    private static function drawSelect(string $q, array $opts, int $cur): int
+    private static function drawSelect(string $q, array $opts, int $cur, bool $back): int
     {
         $w = Term::width() - 2;
         $labelW = max(array_map(function ($o) { return Str::len($o['label']); }, $opts));
@@ -514,13 +539,13 @@ final class UI
                 : '    ' . $label . C::muted($hint);
             $i++;
         }
-        $out[] = '  ' . C::muted('↑↓ mover · enter elegir · q salir');
+        $out[] = '  ' . C::muted('↑↓ mover · enter elegir' . ($back ? ' · ← volver' : '') . ' · q salir');
         Term::write(implode("\n", $out) . "\n");
         return count($out);
     }
 
-    /** Selección múltiple. Devuelve las claves marcadas. */
-    public static function multiselect(string $q, array $opts): array
+    /** Selección múltiple. Devuelve las claves marcadas, o UI::BACK si $back y se pide volver. */
+    public static function multiselect(string $q, array $opts, bool $back = false)
     {
         $opts = self::normalize($opts);
         $keys = array_keys($opts);
@@ -530,7 +555,7 @@ final class UI
             $n = count($keys);
             $cur = 0;
             Term::hideCursor();
-            $lines = self::drawMulti($q, $opts, $sel, $cur);
+            $lines = self::drawMulti($q, $opts, $sel, $cur, $back);
             while (true) {
                 $k = Term::key();
                 if ($k === 'up') {
@@ -543,13 +568,18 @@ final class UI
                     $sel = array_fill(0, $n, in_array(false, $sel, true));
                 } elseif ($k === 'enter') {
                     break;
+                } elseif ($back && self::wantsBack($k)) {
+                    Term::clearUp($lines);
+                    Term::rawOff();
+                    Term::showCursor();
+                    return self::BACK;
                 } elseif (in_array($k, ['ctrl-c', 'esc', 'q'], true)) {
                     self::cancelPrompt($lines);
                 } else {
                     continue;
                 }
                 Term::clearUp($lines);
-                $lines = self::drawMulti($q, $opts, $sel, $cur);
+                $lines = self::drawMulti($q, $opts, $sel, $cur, $back);
             }
             Term::clearUp($lines);
             Term::rawOff();
@@ -561,12 +591,15 @@ final class UI
                     $box = $sel[$i] ? C::ok('[x]') : C::muted('[ ]');
                     Term::line('    ' . C::accent((string) ($i + 1)) . C::muted(')') . " $box " . $opts[$key]['label']);
                 }
-                $a = Term::readLine('    ' . C::muted('Números para marcar/desmarcar (ej. 2,4) · enter para continuar: '));
+                $a = Term::readLine('    ' . C::muted('Números para marcar/desmarcar (ej. 2,4)' . ($back ? ' · 0 volver' : '') . ' · enter para continuar: '));
                 if ($a === null) {
                     App::abort();
                 }
                 if (trim($a) === '') {
                     break;
+                }
+                if ($back && (trim($a) === '0' || strtolower(trim($a)) === 'b')) {
+                    return self::BACK;
                 }
                 foreach (preg_split('/[\s,]+/', trim($a)) as $num) {
                     if (ctype_digit($num) && isset($sel[(int) $num - 1])) {
@@ -587,7 +620,7 @@ final class UI
         return $chosen;
     }
 
-    private static function drawMulti(string $q, array $opts, array $sel, int $cur): int
+    private static function drawMulti(string $q, array $opts, array $sel, int $cur, bool $back): int
     {
         $w = Term::width() - 2;
         $labelW = max(array_map(function ($o) { return Str::len($o['label']); }, $opts));
@@ -603,7 +636,7 @@ final class UI
                 : "    $box " . $label . C::muted($hint);
             $i++;
         }
-        $out[] = '  ' . C::muted('↑↓ mover · espacio marcar · a todas · enter confirmar');
+        $out[] = '  ' . C::muted('↑↓ mover · espacio marcar · a todas · enter confirmar' . ($back ? ' · ← volver' : ''));
         Term::write(implode("\n", $out) . "\n");
         return count($out);
     }
@@ -903,6 +936,18 @@ final class Fs
         return (bool) preg_match('/\.(php\d?|phtml|phar|pht|phps|suspected)$/i', $name);
     }
 
+    /** Archivos que el servidor puede ejecutar o servir como código. */
+    public static function isExecutable(string $name): bool
+    {
+        return self::isPhp($name) || (bool) preg_match('/(?:\.(?:js|html?|cgi|pl|py|sh|so)|(?:^|\/)\.htaccess|(?:^|\/)\.user\.ini)$/i', $name);
+    }
+
+    /** Archivos que genera el sistema y no indican una infección. */
+    public static function isNoise(string $name): bool
+    {
+        return (bool) preg_match('/(?:^|\/)(?:error_log|php_errorlog|\.DS_Store|Thumbs\.db)$/i', $name);
+    }
+
     /** Lista recursiva de archivos, rutas relativas a $dir con "/". */
     public static function listFiles(string $dir): array
     {
@@ -1197,9 +1242,14 @@ final class WordPress
 
     /* ── Análisis ─────────────────────────────────────────────────────────── */
 
+    /**
+     * Compara el núcleo con los checksums oficiales.
+     *  - unknown: archivos no oficiales con extensión ejecutable (PHP, JS, .htaccess…)
+     *  - extra:   otros archivos no oficiales; los registros como error_log se ignoran
+     */
     public function integrity(array $sums, ?Task $t = null): array
     {
-        $r = ['ok' => 0, 'modified' => [], 'missing' => [], 'unknown' => []];
+        $r = ['ok' => 0, 'modified' => [], 'missing' => [], 'unknown' => [], 'extra' => []];
         $total = count($sums);
         $i = 0;
         foreach ($sums as $file => $md5) {
@@ -1217,9 +1267,10 @@ final class WordPress
         }
         foreach (['wp-admin', 'wp-includes'] as $dir) {
             foreach (Fs::listFiles("{$this->path}/$dir") as $rel) {
-                if (!isset($sums["$dir/$rel"])) {
-                    $r['unknown'][] = "$dir/$rel";
+                if (isset($sums["$dir/$rel"]) || Fs::isNoise($rel)) {
+                    continue;
                 }
+                $r[Fs::isExecutable($rel) ? 'unknown' : 'extra'][] = "$dir/$rel";
             }
         }
         return $r;
@@ -1242,6 +1293,11 @@ final class WordPress
         return $out;
     }
 
+    /**
+     * Archivos PHP con código real dentro de uploads. Se descartan los que no contienen
+     * código (index.php vacíos o con solo comentarios, archivos ._ de macOS, binarios).
+     * Devuelve [['file', 'level' => alta|revisar, 'why' => [...]]].
+     */
     public function uploadsPhp(): array
     {
         $dir = "{$this->path}/wp-content/uploads";
@@ -1250,13 +1306,49 @@ final class WordPress
             if (!Fs::isPhp($rel)) {
                 continue;
             }
-            $abs = "$dir/$rel";
-            if (basename($rel) === 'index.php' && filesize($abs) < 80 && stripos((string) file_get_contents($abs), 'silence') !== false) {
+            $src = (string) @file_get_contents("$dir/$rel", false, null, 0, 3 * 1024 * 1024);
+            if (!self::hasCode($src)) {
                 continue;
             }
-            $out[] = "wp-content/uploads/$rel";
+            [$why, $level] = self::signatures($src);
+            $out[] = ['file' => "wp-content/uploads/$rel", 'level' => $level === 'alta' ? 'alta' : 'revisar', 'why' => $why];
         }
+        usort($out, function ($a, $b) { return strcmp($a['level'], $b['level']) ?: strcmp($a['file'], $b['file']); });
         return $out;
+    }
+
+    /** ¿El archivo contiene código PHP que se ejecute, más allá de comentarios? */
+    public static function hasCode(string $src): bool
+    {
+        if (strpos($src, '<?') === false) {
+            return false;  // sin etiqueta PHP no hay nada que ejecutar (p. ej. archivos ._ de macOS)
+        }
+        if (function_exists('token_get_all')) {
+            // el texto fuera de las etiquetas PHP (T_INLINE_HTML) se imprime, no se ejecuta
+            $ignore = [T_OPEN_TAG, T_CLOSE_TAG, T_COMMENT, T_DOC_COMMENT, T_WHITESPACE, T_INLINE_HTML];
+            foreach (@token_get_all($src) as $tok) {
+                if (!is_array($tok) || !in_array($tok[0], $ignore, true)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        $code = preg_replace(['#/\*.*?\*/#s', '#(?://|\#)[^\n]*#', '#<\?(?:php)?|\?>#i'], '', $src);
+        return trim((string) $code) !== '';
+    }
+
+    /** Firmas encontradas en $src y su nivel más alto (alta, media o ''). */
+    public static function signatures(string $src): array
+    {
+        $found = [];
+        $level = '';
+        foreach (self::SIGNATURES as [$name, $regex, $sev]) {
+            if (@preg_match($regex, $src)) {
+                $found[] = $name;
+                $level = $sev === 'alta' || $level === 'alta' ? 'alta' : 'media';
+            }
+        }
+        return [$found, $level];
     }
 
     /** Escaneo heurístico de firmas de malware. */
@@ -1286,19 +1378,13 @@ final class WordPress
                 continue;
             }
             $src = (string) @file_get_contents($abs);
-            $found = [];
-            $level = 'media';
-            foreach (self::SIGNATURES as [$name, $regex, $sev]) {
-                if (@preg_match($regex, $src)) {
-                    $found[] = $name;
-                    if ($sev === 'alta') {
-                        $level = 'alta';
-                    }
-                }
+            if (Fs::isPhp($rel) && !self::hasCode($src)) {
+                continue;
             }
+            [$found, $level] = self::signatures($src);
             if (Str::starts($rel, 'wp-content/uploads/') && Fs::isPhp($rel)) {
-                array_unshift($found, 'PHP dentro de uploads');
-                $level = 'alta';
+                array_unshift($found, 'PHP con código dentro de uploads');
+                $level = $level ?: 'media';
             }
             if ($found) {
                 $hits[] = ['file' => $rel, 'level' => $level, 'why' => $found];
@@ -1551,6 +1637,9 @@ final class App
     private $opts = [];
     /** @var WordPress */
     private $wp;
+    /** Instalaciones encontradas al buscar en subcarpetas, para "Cambiar de sitio". */
+    private $installs = [];
+    private $base = '';
 
     public static function abort(): void
     {
@@ -1604,7 +1693,9 @@ final class App
             $this->locate();
             $this->summary();
             if ($cmd !== null) {
-                $this->dispatch($cmd);
+                if (!$this->dispatch($cmd)) {
+                    $this->menu();
+                }
             } else {
                 $this->menu();
             }
@@ -1678,20 +1769,30 @@ final class App
         if (!$found) {
             return null;
         }
-        $rel = function (string $p) use ($base): string {
-            return Str::starts($p, "$base/") ? substr($p, strlen($base) + 1) : $p;
-        };
+        $this->base = $base;
+        $this->installs = $found;
         if (UI::$auto || !Term::$input) {
-            UI::items(array_map($rel, $found), 30, 'white');
+            UI::items(array_map([$this, 'relative'], $found), 30, 'white');
             throw new RuntimeException('Hay varias instalaciones: elige una con --path=/ruta/a/wordpress');
         }
+        return $this->chooseSite(false);
+    }
+
+    private function relative(string $p): string
+    {
+        return Str::starts($p, "{$this->base}/") ? substr($p, strlen($this->base) + 1) : $p;
+    }
+
+    /** Menú con las instalaciones encontradas. Devuelve la ruta o UI::BACK. */
+    private function chooseSite(bool $back): string
+    {
         $opts = [];
-        foreach ($found as $p) {
+        foreach ($this->installs as $p) {
             $version = (new WordPress($p))->version();
-            $opts[$p] = ['label' => $rel($p), 'hint' => $version ? "WordPress $version" : 'núcleo dañado o eliminado'];
+            $opts[$p] = ['label' => $this->relative($p), 'hint' => $version ? "WordPress $version" : 'núcleo dañado o eliminado'];
         }
         Term::line();
-        return UI::select('¿Qué sitio quieres usar?', $opts);
+        return UI::select('¿Qué sitio quieres usar?', $opts, $this->wp ? $this->wp->path : null, $back);
     }
 
     private function summary(): void
@@ -1722,18 +1823,34 @@ final class App
     {
         while (true) {
             UI::title('¿Qué quieres hacer?');
-            $choice = UI::select('Elige una acción', [
+            $items = [
                 'reinstall' => ['label' => 'Reinstalar núcleo', 'hint' => 'Reemplaza wp-admin, wp-includes y archivos raíz por una copia limpia'],
                 'verify'    => ['label' => 'Verificar integridad', 'hint' => 'Compara cada archivo con los checksums oficiales'],
                 'scan'      => ['label' => 'Buscar código malicioso', 'hint' => 'Escaneo heurístico de wp-content, uploads y raíz'],
                 'salts'     => ['label' => 'Regenerar claves SALT', 'hint' => 'Invalida todas las sesiones abiertas'],
-                'exit'      => ['label' => 'Salir', 'hint' => ''],
-            ], 'reinstall');
+            ];
+            if (count($this->installs) > 1) {
+                $items['site'] = ['label' => 'Cambiar de sitio', 'hint' => 'Ahora: ' . $this->relative($this->wp->path)];
+            }
+            $items['exit'] = ['label' => 'Salir', 'hint' => ''];
+            $choice = UI::select('Elige una acción', $items, 'reinstall');
             if ($choice === 'exit') {
                 Term::line();
                 return;
             }
-            $this->dispatch($choice);
+            if ($choice === 'site') {
+                $path = $this->chooseSite(true);
+                if ($path === UI::BACK) {
+                    UI::back();
+                } else {
+                    $this->wp = new WordPress($path);
+                    $this->summary();
+                }
+                continue;
+            }
+            if (!$this->dispatch($choice)) {
+                continue;  // se volvió atrás desde el primer paso: de vuelta al menú
+            }
             if (UI::$auto || !UI::confirm('¿Volver al menú principal?', false)) {
                 Term::line();
                 return;
@@ -1741,150 +1858,259 @@ final class App
         }
     }
 
-    private function dispatch(string $cmd): void
+    /** Ejecuta un comando. Devuelve false si el usuario volvió atrás antes de empezar. */
+    private function dispatch(string $cmd): bool
     {
         switch ($cmd) {
-            case 'reinstall': $this->reinstall(); break;
+            case 'reinstall': return $this->reinstall();
             case 'verify':    $this->verify(); break;
             case 'scan':      $this->scan(); break;
             case 'salts':     $this->salts(); break;
         }
+        return true;
     }
 
     /* ── Reinstalar ───────────────────────────────────────────────────────── */
 
-    private function reinstall(): void
+    /**
+     * Asistente de reinstalación. Los pasos 1-3 solo preguntan y se pueden recorrer
+     * hacia atrás; el paso 4 es el único que modifica el sitio.
+     * Devuelve false si el usuario volvió atrás desde el primer paso.
+     */
+    private function reinstall(): bool
     {
         $wp = $this->wp;
         $current = $wp->version();
-        $began = microtime(true);
         $windows = DIRECTORY_SEPARATOR === '\\';
+        $s = (object) [
+            'current' => $current, 'latest' => false, 'flag' => $this->opts['version'] ?? null,
+            'target' => null, 'sums' => null, 'opts' => null, 'extra' => null, 'windows' => $windows,
+        ];
 
-        // 1 · Versión
+        // Cada paso devuelve 'next', 'skip' (no preguntó nada), 'cancel' o UI::BACK.
+        $steps = ['stepVersion', 'stepOptions', 'stepRootFiles', 'stepConfirm'];
+        $history = [];
+        for ($i = 0; $i < count($steps);) {
+            $res = $this->{$steps[$i]}($s);
+            if ($res === 'cancel') {
+                return true;
+            }
+            if ($res === UI::BACK) {
+                if (!$history) {
+                    UI::back();
+                    return false;
+                }
+                $i = array_pop($history);
+                UI::back();
+                continue;
+            }
+            if ($res === 'next') {
+                $history[] = $i;
+            }
+            $i++;
+        }
+
+        $target = $s->target;
+        $sums = $s->sums;
+        $opts = $s->opts;
+        $extra = $s->extra ?: [];
+        $began = microtime(true);
+        $this->execute($target, $sums, $opts, $extra, $current, $began);
+        return true;
+    }
+
+    private function stepVersion(stdClass $s): string
+    {
         UI::step(1, 4, 'Versión de WordPress');
-        $latest = null;
-        $t = new Task('Consultando versiones en wordpress.org');
-        try {
-            $latest = WordPress::latest();
-            $t->done("última estable: $latest");
-        } catch (Throwable $e) {
-            $t->warn('sin respuesta, podrás escribir la versión');
+        if ($s->latest === false) {
+            $s->latest = null;
+            $t = new Task('Consultando versiones en wordpress.org');
+            try {
+                $s->latest = WordPress::latest();
+                $t->done("última estable: {$s->latest}");
+            } catch (Throwable $e) {
+                $t->warn('sin respuesta, podrás escribir la versión');
+            }
         }
+        $current = $s->current;
+        $latest = $s->latest;
 
-        $flag = $this->opts['version'] ?? null;
-        if (is_string($flag)) {
-            $target = $flag === 'latest' ? $latest : ($flag === 'current' ? $current : $flag);
+        if (is_string($s->flag)) {
+            $target = $s->flag === 'latest' ? $latest : ($s->flag === 'current' ? $current : $s->flag);
             if (!$target) {
-                throw new RuntimeException("No se pudo resolver --version=$flag");
+                throw new RuntimeException("No se pudo resolver --version={$s->flag}");
             }
-            UI::success("Versión indicada: " . C::accent($target));
-        } else {
-            $choices = [];
-            if ($current) {
-                $choices['current'] = ['label' => "Misma versión ($current)", 'short' => $current, 'hint' => 'Recomendado: limpia sin cambiar de versión'];
+            UI::success('Versión indicada: ' . C::accent($target));
+            if ($s->target !== $target) {
+                $s->sums = Task::run("Obteniendo checksums oficiales de $target", function () use ($target) {
+                    return WordPress::checksums($target);
+                });
+                $s->target = $target;
             }
-            if ($latest && $latest !== $current) {
-                $choices['latest'] = ['label' => "Última versión ($latest)", 'short' => $latest, 'hint' => 'Limpia y actualiza en un solo paso'];
-            }
-            $choices['custom'] = ['label' => 'Otra versión…', 'short' => 'otra', 'hint' => 'Escribe el número, ej. 6.4.3'];
-            $pick = UI::select('¿Qué versión quieres instalar?', $choices, $current ? 'current' : 'latest');
-            $target = $pick === 'current' ? $current : ($pick === 'latest' ? $latest : null);
+            return 'skip';
         }
 
-        $sums = null;
-        while ($sums === null) {
+        $choices = [];
+        if ($current) {
+            $choices['current'] = ['label' => "Misma versión ($current)", 'short' => $current, 'hint' => 'Recomendado: limpia sin cambiar de versión'];
+        }
+        if ($latest && $latest !== $current) {
+            $choices['latest'] = ['label' => "Última versión ($latest)", 'short' => $latest, 'hint' => 'Limpia y actualiza en un solo paso'];
+        }
+        $choices['custom'] = ['label' => 'Otra versión…', 'short' => 'otra', 'hint' => 'Escribe el número, ej. 6.4.3'];
+        $pick = UI::select('¿Qué versión quieres instalar?', $choices, $current ? 'current' : 'latest', true);
+        if ($pick === UI::BACK) {
+            return UI::BACK;
+        }
+        $target = $pick === 'current' ? $current : ($pick === 'latest' ? $latest : null);
+
+        while (true) {
             if ($target === null) {
                 $target = UI::ask('Versión de WordPress', $current ?? (string) $latest, function ($v) {
                     return preg_match('/^\d+\.\d+(\.\d+)?$/', $v) ? null : 'Formato no válido (ej. 6.4.3).';
                 });
             }
+            if ($s->target === $target && $s->sums) {
+                return 'next';
+            }
             try {
-                $sums = Task::run("Obteniendo checksums oficiales de $target", function () use ($target) {
+                $s->sums = Task::run("Obteniendo checksums oficiales de $target", function () use ($target) {
                     return WordPress::checksums($target);
                 });
+                $s->target = $target;
+                $s->extra = null;  // la lista de archivos extraños depende de la versión
+                return 'next';
             } catch (RuntimeException $e) {
-                if (UI::$auto || is_string($flag)) {
+                if (UI::$auto) {
                     throw $e;
                 }
                 $target = null;
             }
         }
+    }
 
-        // 2 · Análisis y opciones
+    private function stepOptions(stdClass $s): string
+    {
+        $wp = $this->wp;
         UI::step(2, 4, 'Análisis y opciones');
-        $defs = [
-            'scan'    => ['label' => 'Analizar el núcleo actual', 'short' => 'análisis', 'hint' => 'detecta archivos modificados o inyectados', 'checked' => true],
-            'backup'  => ['label' => 'Respaldo .zip del núcleo', 'short' => 'respaldo', 'hint' => 'se guarda fuera de la carpeta pública si es posible', 'checked' => !isset($this->opts['no-backup'])],
-            'unknown' => ['label' => 'Limpiar archivos extraños', 'short' => 'limpieza raíz', 'hint' => 'archivos PHP en la raíz que no son del núcleo', 'checked' => !isset($this->opts['keep-unknown'])],
-            'salts'   => ['label' => 'Regenerar claves SALT', 'short' => 'SALT', 'hint' => 'cierra todas las sesiones activas', 'checked' => !isset($this->opts['no-salts'])],
-            'perms'   => ['label' => 'Corregir permisos', 'short' => 'permisos', 'hint' => $windows ? 'no aplica en Windows' : 'carpetas 755 · archivos 644', 'checked' => isset($this->opts['fix-perms']) && !$windows],
-            'verify'  => ['label' => 'Verificación final', 'short' => 'verificación', 'hint' => 'confirma con checksums que todo quedó limpio', 'checked' => true],
+        $defaults = [
+            'scan'    => true,
+            'backup'  => !isset($this->opts['no-backup']),
+            'unknown' => !isset($this->opts['keep-unknown']),
+            'salts'   => !isset($this->opts['no-salts']),
+            'perms'   => isset($this->opts['fix-perms']) && !$s->windows,
+            'verify'  => true,
         ];
-        $opts = array_flip(UI::multiselect('¿Qué incluir en el proceso?', $defs));
+        $defs = [
+            'scan'    => ['label' => 'Analizar el núcleo actual', 'short' => 'análisis', 'hint' => 'detecta archivos modificados o inyectados'],
+            'backup'  => ['label' => 'Respaldo .zip del núcleo', 'short' => 'respaldo', 'hint' => 'se guarda fuera de la carpeta pública si es posible'],
+            'unknown' => ['label' => 'Limpiar archivos extraños', 'short' => 'limpieza raíz', 'hint' => 'archivos PHP en la raíz que no son del núcleo'],
+            'salts'   => ['label' => 'Regenerar claves SALT', 'short' => 'SALT', 'hint' => 'cierra todas las sesiones activas'],
+            'perms'   => ['label' => 'Corregir permisos', 'short' => 'permisos', 'hint' => $s->windows ? 'no aplica en Windows' : 'carpetas 755 · archivos 644'],
+            'verify'  => ['label' => 'Verificación final', 'short' => 'verificación', 'hint' => 'confirma con checksums que todo quedó limpio'],
+        ];
+        foreach ($defs as $key => &$def) {
+            // al volver a este paso se conserva lo que se había marcado
+            $def['checked'] = $s->opts !== null ? isset($s->opts[$key]) : $defaults[$key];
+        }
+        unset($def);
 
-        if (isset($opts['scan']) && $current) {
+        $picked = UI::multiselect('¿Qué incluir en el proceso?', $defs, true);
+        if ($picked === UI::BACK) {
+            return UI::BACK;
+        }
+        $s->opts = array_flip($picked);
+
+        if (isset($s->opts['scan']) && $s->current) {
             Term::line();
             try {
-                $currentSums = $current === $target ? $sums : WordPress::checksumsFor($current, $wp->locale());
+                $currentSums = $s->current === $s->target ? $s->sums : WordPress::checksumsFor($s->current, $wp->locale());
                 $r = Task::run('Analizando el núcleo actual', function (Task $t) use ($wp, $currentSums) {
                     return $wp->integrity($currentSums, $t);
                 });
-                $issues = count($r['modified']) + count($r['missing']) + count($r['unknown']);
-                if ($issues === 0) {
+                if (!$r['modified'] && !$r['missing'] && !$r['unknown']) {
                     UI::success('Núcleo sin alteraciones detectadas ' . C::muted('(' . Str::num($r['ok']) . ' archivos íntegros)'));
-                } else {
-                    Report::issueLine('Modificados', $r['modified'], 'err');
-                    Report::issueLine('Inyectados en wp-admin / wp-includes', $r['unknown'], 'err');
-                    Report::issueLine('Faltantes', $r['missing'], 'warn');
                 }
+                Report::issueLine('Modificados', $r['modified'], 'err');
+                Report::issueLine('Ejecutables inyectados en wp-admin / wp-includes', $r['unknown'], 'err');
+                Report::issueLine('Faltantes', $r['missing'], 'warn');
+                Report::issueLine('Otros archivos no oficiales (se eliminarán con el núcleo)', $r['extra'], 'muted', 4);
             } catch (Throwable $e) {
                 UI::warning('No se pudo analizar: ' . $e->getMessage());
             }
             $uploads = $wp->uploadsPhp();
-            if ($uploads) {
-                Report::issueLine('PHP en wp-content/uploads (revísalos a mano)', $uploads, 'warn', 5);
-            }
+            Report::issueLine('PHP con firmas de malware en uploads (bórralos a mano)', Report::uploadLines($uploads, 'alta'), 'err', 6);
+            Report::issueLine('PHP con código en uploads (revísalos a mano)', Report::uploadLines($uploads, 'revisar'), 'warn', 6);
         }
+        return 'next';
+    }
 
-        $extra = [];
-        if (isset($opts['unknown'])) {
-            $found = $wp->rootUnknown($sums);
-            if (!$found) {
-                Term::line();
-                UI::success('La raíz no contiene archivos extraños');
-            } else {
-                Term::line();
-                $choices = [];
-                foreach ($found as $f) {
-                    $choices[$f['name']] = [
-                        'label'   => $f['name'],
-                        'hint'    => Str::bytes($f['size']) . ($f['php'] ? '  · PHP fuera del núcleo' : ''),
-                        'checked' => $f['php'],
-                    ];
-                }
-                $extra = UI::multiselect('Archivos extraños en la raíz · ¿cuáles eliminar?', $choices);
-            }
+    private function stepRootFiles(stdClass $s): string
+    {
+        if (!isset($s->opts['unknown'])) {
+            $s->extra = [];
+            return 'skip';
         }
+        $found = $this->wp->rootUnknown($s->sums);
+        Term::line();
+        if (!$found) {
+            UI::success('La raíz no contiene archivos extraños');
+            $s->extra = [];
+            return 'skip';
+        }
+        $choices = [];
+        foreach ($found as $f) {
+            $choices[$f['name']] = [
+                'label'   => $f['name'],
+                'hint'    => Str::bytes($f['size']) . ($f['php'] ? '  · PHP fuera del núcleo' : ''),
+                'checked' => $s->extra !== null ? in_array($f['name'], $s->extra, true) : $f['php'],
+            ];
+        }
+        $picked = UI::multiselect('Archivos extraños en la raíz · ¿cuáles eliminar?', $choices, true);
+        if ($picked === UI::BACK) {
+            return UI::BACK;
+        }
+        $s->extra = $picked;
+        return 'next';
+    }
 
-        // 3 · Confirmación
+    private function stepConfirm(stdClass $s): string
+    {
+        $wp = $this->wp;
+        $opts = $s->opts;
+        $extra = $s->extra ?: [];
         UI::step(3, 4, 'Confirmación');
         $keep = array_values(array_filter(['wp-config.php', 'wp-content/', '.htaccess'], function ($f) use ($wp) {
             return file_exists("{$wp->path}/" . rtrim($f, '/'));
         }));
         UI::panel('Resumen', [
             ['Sitio', Str::fitLeft($wp->path, 50), 'white'],
-            ['Versión', ($current ?: '¿?') . '  →  ' . $target, 'accent'],
-            ['Se reemplaza', 'wp-admin/, wp-includes/ y ' . count(WordPress::rootCore($sums)) . ' archivos raíz', null],
-            ['Se elimina', $extra ? Str::plural(count($extra), 'archivo extraño', 'archivos extraños') : 'ningún archivo extra', $extra ? 'warn' : 'muted'],
+            ['Versión', ($s->current ?: '¿?') . '  →  ' . $s->target, 'accent'],
+            ['Se reemplaza', 'wp-admin/, wp-includes/ y ' . count(WordPress::rootCore($s->sums)) . ' archivos raíz', null],
+            ['Se elimina', $extra ? implode(', ', $extra) : 'ningún archivo extra', $extra ? 'warn' : 'muted'],
             ['Se conserva', implode(', ', $keep), 'ok'],
             ['Respaldo', isset($opts['backup']) ? 'sí, en .zip' : 'no', isset($opts['backup']) ? null : 'warn'],
             ['Extras', implode(', ', array_filter([isset($opts['salts']) ? 'SALT' : '', isset($opts['perms']) ? 'permisos' : '', isset($opts['verify']) ? 'verificación' : ''])) ?: '—', null],
         ], 'warn');
         Term::line();
-        if (!UI::confirm('¿Iniciar la reinstalación?', true)) {
-            UI::note('No se realizó ningún cambio.');
-            return;
+        $choice = UI::select('¿Todo correcto?', [
+            'go'     => ['label' => 'Iniciar la reinstalación', 'short' => 'iniciar'],
+            'back'   => ['label' => 'Volver y cambiar opciones', 'short' => 'volver', 'hint' => 'regresa al paso anterior sin tocar nada'],
+            'cancel' => ['label' => 'Cancelar', 'short' => 'cancelar', 'hint' => 'no se realiza ningún cambio'],
+        ], 'go', true);
+        if ($choice === UI::BACK || $choice === 'back') {
+            return UI::BACK;
         }
+        if ($choice === 'cancel') {
+            UI::note('No se realizó ningún cambio.');
+            return 'cancel';
+        }
+        return 'next';
+    }
+
+    private function execute(string $target, array $sums, array $opts, array $extra, ?string $current, float $began): void
+    {
+        $wp = $this->wp;
 
         // 4 · Ejecución
         UI::step(4, 4, 'Reinstalación');
@@ -2039,7 +2265,7 @@ final class App
         Term::line();
         $clean = Report::integrity($r, $version);
         $this->saveReport(Report::integrityText($r, $version, $wp->path), $clean);
-        if (!$clean) {
+        if (Report::coreDirty($r)) {
             Term::line();
             UI::info('Para limpiar el núcleo ejecuta: ' . C::accent('php ' . basename(__FILE__) . ' reinstall'));
         }
@@ -2168,42 +2394,63 @@ final class Report
         if (!$items) {
             return;
         }
-        $icon = $tone === 'err' ? C::err('✖') : C::warn('▲');
-        Term::line("  $icon $label " . C::tone('(' . count($items) . ')', $tone));
+        $icons = ['err' => C::err('✖'), 'warn' => C::warn('▲'), 'muted' => C::accent('ℹ')];
+        Term::line('  ' . ($icons[$tone] ?? $icons['warn']) . " $label " . C::tone('(' . count($items) . ')', $tone));
         UI::items($items, $max);
+    }
+
+    /** Entradas de uploadsPhp() como texto: "ruta · motivo". */
+    public static function uploadLines(array $uploads, ?string $level = null): array
+    {
+        $out = [];
+        foreach ($uploads as $u) {
+            if ($level === null || $u['level'] === $level) {
+                $out[] = $u['file'] . ($u['why'] ? '  · ' . implode(', ', $u['why']) : '');
+            }
+        }
+        return $out;
+    }
+
+    /** El núcleo tiene algo que la reinstalación corrige. */
+    public static function coreDirty(array $r): bool
+    {
+        return (bool) ($r['modified'] || $r['missing'] || $r['unknown'] || $r['extra']);
     }
 
     public static function integrity(array $r, string $version): bool
     {
         $rootPhp = array_filter($r['root'], [Fs::class, 'isPhp']);
-        $clean = !$r['modified'] && !$r['missing'] && !$r['unknown'] && !$r['uploads'] && !$rootPhp;
-        $n = function (array $a, string $bad) { return [(string) count($a), count($a) ? $bad : 'ok']; };
+        $malware = self::uploadLines($r['uploads'], 'alta');
+        $review = self::uploadLines($r['uploads'], 'revisar');
+        $danger = $r['modified'] || $r['unknown'] || $malware || $rootPhp;
+        $clean = !$danger && !$r['missing'] && !$r['extra'] && !$review && !$r['root'];
+        $count = function (array $a, string $bad) { return [(string) count($a), count($a) ? $bad : 'ok']; };
 
         $rows = [['Íntegros', Str::num($r['ok']), 'ok']];
         foreach ([
             'Modificados'        => [$r['modified'], 'err'],
             'Inyectados'         => [$r['unknown'], 'err'],
+            'Otros no oficiales' => [$r['extra'], 'warn'],
             'Faltantes'          => [$r['missing'], 'warn'],
-            'PHP en uploads'     => [$r['uploads'], 'err'],
-            'Extraños en raíz'   => [$r['root'], 'warn'],
+            'Extraños en raíz'   => [$r['root'], $rootPhp ? 'err' : 'warn'],
         ] as $label => [$list, $bad]) {
-            [$count, $tone] = $n($list, $bad);
-            $rows[] = [$label, $count, $tone];
+            $rows[] = array_merge([$label], $count($list, $bad));
         }
-        UI::panel("Integridad · WordPress $version", $rows, $clean ? 'ok' : 'err');
+        $rows[] = ['PHP en uploads', count($malware) . ' con malware · ' . count($review) . ' para revisar', $malware ? 'err' : ($review ? 'warn' : 'ok')];
+        UI::panel("Integridad · WordPress $version", $rows, $danger ? 'err' : ($clean ? 'ok' : 'warn'));
 
-        if ($clean) {
-            Term::line();
-            UI::success('El núcleo coincide con la copia oficial de wordpress.org');
-            return true;
-        }
         Term::line();
+        if (!self::coreDirty($r)) {
+            UI::success('El núcleo coincide con la copia oficial de wordpress.org');
+        }
         self::issueLine('Archivos del núcleo modificados', $r['modified'], 'err');
-        self::issueLine('Archivos inyectados en wp-admin / wp-includes', $r['unknown'], 'err');
-        self::issueLine('PHP dentro de wp-content/uploads', $r['uploads'], 'err');
+        self::issueLine('Archivos ejecutables inyectados en wp-admin / wp-includes', $r['unknown'], 'err');
+        self::issueLine('PHP con firmas de malware en uploads', $malware, 'err');
+        self::issueLine('PHP con código en uploads (revísalos a mano)', $review, 'warn');
+        self::issueLine('Otros archivos no oficiales en wp-admin / wp-includes', $r['extra'], 'warn');
         self::issueLine('Archivos faltantes', $r['missing'], 'warn');
-        self::issueLine('Archivos extraños en la raíz', $r['root'], 'warn');
-        return false;
+        self::issueLine('Archivos extraños en la raíz', $r['root'], $rootPhp ? 'err' : 'warn');
+        return $clean;
     }
 
     public static function integrityText(array $r, string $version, string $path): string
@@ -2211,8 +2458,10 @@ final class Report
         $out = ['WPCore · Verificación de integridad', "Sitio: $path", "WordPress: $version", 'Fecha: ' . date('Y-m-d H:i:s'), ''];
         foreach ([
             'MODIFICADOS' => $r['modified'],
-            'INYECTADOS EN WP-ADMIN / WP-INCLUDES' => $r['unknown'],
-            'PHP EN UPLOADS' => $r['uploads'],
+            'EJECUTABLES INYECTADOS EN WP-ADMIN / WP-INCLUDES' => $r['unknown'],
+            'PHP CON FIRMAS DE MALWARE EN UPLOADS' => self::uploadLines($r['uploads'], 'alta'),
+            'PHP CON CÓDIGO EN UPLOADS (REVISAR)' => self::uploadLines($r['uploads'], 'revisar'),
+            'OTROS NO OFICIALES EN WP-ADMIN / WP-INCLUDES' => $r['extra'],
             'FALTANTES' => $r['missing'],
             'EXTRAÑOS EN LA RAÍZ' => $r['root'],
         ] as $title => $list) {
