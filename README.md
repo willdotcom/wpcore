@@ -23,12 +23,14 @@ Reemplaza `wp-admin/`, `wp-includes/` y los archivos raíz del núcleo por una c
 
 ## Instalación
 
-Desde la raíz del WordPress del cliente:
+Desde la carpeta de la cuenta del cliente (por ejemplo `/home/cliente`) o desde la raíz de su WordPress:
 
 ```bash
-curl -sO https://raw.githubusercontent.com/willdotcom/wpcore/main/wpcore.php
+curl -fsSLO https://raw.githubusercontent.com/willdotcom/wpcore/main/wpcore.php
 php wpcore.php
 ```
+
+Si lo ejecutas en `/home/cliente`, encuentra solo el WordPress en `public_html`, `www` o `htdocs`, y el script queda fuera de la carpeta pública.
 
 El script solo funciona desde la terminal: si alguien lo abre desde el navegador responde 403. Aun así, bórralo del servidor cuando termines.
 
@@ -55,7 +57,7 @@ php wpcore.php
 
 | Opción | Descripción |
 | --- | --- |
-| `--path=<dir>` | Ruta de WordPress. Por defecto, el directorio actual o el primero hacia arriba que contenga WordPress |
+| `--path=<dir>` | Ruta de WordPress. Por defecto busca en el directorio actual, luego hacia arriba y después en sus carpetas `public_html`, `www` o `htdocs` |
 | `--version=<v>` | Versión a instalar: `current`, `latest` o un número como `6.4.3` |
 | `-y`, `--yes` | Modo desatendido: acepta los valores por defecto |
 | `--no-backup` | No crear el respaldo `.zip` del núcleo actual |

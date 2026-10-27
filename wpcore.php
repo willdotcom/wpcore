@@ -1046,13 +1046,19 @@ final class WordPress
         $this->path = Fs::norm(realpath($path) ?: $path);
     }
 
-    /** Busca la raíz de WordPress desde $dir hacia arriba. */
+    /** Carpetas públicas habituales en hostings (cPanel, Debian/Ubuntu, XAMPP). */
+    const PUBLIC_DIRS = ['public_html', 'www', 'htdocs'];
+
+    /**
+     * Busca la raíz de WordPress desde $dir hacia arriba y, si no la encuentra,
+     * dentro de las carpetas públicas habituales de $dir (p. ej. /home/usuario/public_html).
+     */
     public static function detect(string $dir): ?string
     {
-        $dir = realpath($dir);
+        $start = realpath($dir);
+        $dir = $start;
         for ($i = 0; $dir && $i < 6; $i++) {
-            if (is_file("$dir/wp-includes/version.php")
-                || (is_dir("$dir/wp-content") && (is_file("$dir/wp-config.php") || is_file(dirname($dir) . '/wp-config.php')))) {
+            if (self::isRoot($dir)) {
                 return Fs::norm($dir);
             }
             $parent = dirname($dir);
@@ -1061,7 +1067,18 @@ final class WordPress
             }
             $dir = $parent;
         }
+        foreach ($start ? self::PUBLIC_DIRS : [] as $sub) {
+            if (self::isRoot("$start/$sub")) {
+                return Fs::norm((string) realpath("$start/$sub"));
+            }
+        }
         return null;
+    }
+
+    private static function isRoot(string $dir): bool
+    {
+        return is_file("$dir/wp-includes/version.php")
+            || (is_dir("$dir/wp-content") && (is_file("$dir/wp-config.php") || is_file(dirname($dir) . '/wp-config.php')));
     }
 
     private function versionFile(): string
